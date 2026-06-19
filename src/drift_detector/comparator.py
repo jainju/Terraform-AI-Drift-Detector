@@ -188,10 +188,15 @@ class DriftComparator:
                 act_val = actual[key]
                 # Flag if the value indicates something was added/changed
                 if self._is_meaningful_drift_indicator(key, act_val):
-                    changes[key] = {
+                    change_entry: dict[str, Any] = {
                         "expected": "<not managed by terraform>",
                         "actual": act_val,
                     }
+                    # Include the detailed info if available
+                    detail_key = self._get_detail_key(key)
+                    if detail_key and detail_key in actual:
+                        change_entry["details"] = actual[detail_key]
+                    changes[key] = change_entry
 
         # Check for keys in expected but missing from actual (potential issue)
         expected_only = set(expected.keys()) - set(actual.keys()) - self.ignore_attributes
@@ -236,6 +241,25 @@ class DriftComparator:
             return isinstance(value, str) and value != ""
 
         return False
+
+    def _get_detail_key(self, indicator_key: str) -> str | None:
+        """Map a drift indicator count key to its corresponding detail list key."""
+        detail_map = {
+            "object_count": "unmanaged_objects",
+            "subnet_count": "subnet_details",
+            "route_table_count": "route_table_details",
+            "internet_gateway_count": "internet_gateway_details",
+            "nat_gateway_count": "nat_gateway_details",
+            "attached_policy_count": "attached_policy_details",
+            "inline_policy_count": "inline_policy_names",
+            "ingress_rules_count": "ingress_rules",
+            "egress_rules_count": "egress_rules",
+            "gsi_count": "gsi_details",
+            "lsi_count": "lsi_details",
+            "nodegroup_count": "nodegroup_details",
+            "subscription_count": "subscription_details",
+        }
+        return detail_map.get(indicator_key)
 
     def _compare_tags(
         self,

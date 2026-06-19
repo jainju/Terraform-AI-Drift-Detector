@@ -309,13 +309,20 @@ class AWSProvider:
             if "NoSuchLifecycleConfiguration" in str(e):
                 attributes["lifecycle_rules_count"] = 0
 
-        # Get object count (detect unmanaged objects added manually)
+        # Get object count and list objects (detect unmanaged objects added manually)
         try:
-            object_count = 0
+            objects_detail = []
             paginator = s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=bucket_name):
-                object_count += page.get("KeyCount", 0)
-            attributes["object_count"] = object_count
+                for obj in page.get("Contents", []):
+                    objects_detail.append({
+                        "key": obj.get("Key", ""),
+                        "size_bytes": obj.get("Size", 0),
+                        "last_modified": str(obj.get("LastModified", "")),
+                        "storage_class": obj.get("StorageClass", "STANDARD"),
+                    })
+            attributes["object_count"] = len(objects_detail)
+            attributes["unmanaged_objects"] = objects_detail
         except Exception:
             pass
 
@@ -460,40 +467,76 @@ class AWSProvider:
 
         # Count subnets in this VPC (detect manually added subnets)
         subnet_count = 0
+        subnet_details = []
         try:
             subnet_resp = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-            subnet_count = len(subnet_resp.get("Subnets", []))
+            subnets_found = subnet_resp.get("Subnets", [])
+            subnet_count = len(subnets_found)
+            for s in subnets_found:
+                s_tags = self._aws_tags_to_dict(s.get("Tags", []))
+                subnet_details.append({
+                    "subnet_id": s.get("SubnetId", ""),
+                    "name": s_tags.get("Name", ""),
+                    "cidr_block": s.get("CidrBlock", ""),
+                    "availability_zone": s.get("AvailabilityZone", ""),
+                })
         except Exception:
             pass
 
         # Count route tables (detect manually added)
         route_table_count = 0
+        route_table_details = []
         try:
             rt_resp = ec2.describe_route_tables(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
-            route_table_count = len(rt_resp.get("RouteTables", []))
+            rts_found = rt_resp.get("RouteTables", [])
+            route_table_count = len(rts_found)
+            for rt in rts_found:
+                rt_tags = self._aws_tags_to_dict(rt.get("Tags", []))
+                route_table_details.append({
+                    "route_table_id": rt.get("RouteTableId", ""),
+                    "name": rt_tags.get("Name", ""),
+                })
         except Exception:
             pass
 
         # Count internet gateways (detect manually attached)
         igw_count = 0
+        igw_details = []
         try:
             igw_resp = ec2.describe_internet_gateways(
                 Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
             )
-            igw_count = len(igw_resp.get("InternetGateways", []))
+            igws_found = igw_resp.get("InternetGateways", [])
+            igw_count = len(igws_found)
+            for igw in igws_found:
+                igw_tags = self._aws_tags_to_dict(igw.get("Tags", []))
+                igw_details.append({
+                    "igw_id": igw.get("InternetGatewayId", ""),
+                    "name": igw_tags.get("Name", ""),
+                })
         except Exception:
             pass
 
         # Count NAT gateways
         nat_gw_count = 0
+        nat_gw_details = []
         try:
             nat_resp = ec2.describe_nat_gateways(
                 Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
             )
-            nat_gw_count = len([
+            active_nats = [
                 n for n in nat_resp.get("NatGateways", [])
                 if n.get("State") != "deleted"
-            ])
+            ]
+            nat_gw_count = len(active_nats)
+            for nat in active_nats:
+                nat_tags = self._aws_tags_to_dict(nat.get("Tags", []))
+                nat_gw_details.append({
+                    "nat_gateway_id": nat.get("NatGatewayId", ""),
+                    "name": nat_tags.get("Name", ""),
+                    "state": nat.get("State", ""),
+                    "subnet_id": nat.get("SubnetId", ""),
+                })
         except Exception:
             pass
 
@@ -504,9 +547,13 @@ class AWSProvider:
             "enable_dns_support": enable_dns_support,
             "instance_tenancy": vpc.get("InstanceTenancy"),
             "subnet_count": subnet_count,
+            "subnet_details": subnet_details,
             "route_table_count": route_table_count,
+            "route_table_details": route_table_details,
             "internet_gateway_count": igw_count,
+            "internet_gateway_details": igw_details,
             "nat_gateway_count": nat_gw_count,
+            "nat_gateway_details": nat_gw_details,
         }
 
         return ResourceMetadata(
@@ -672,11 +719,16 @@ class AWSProvider:
 
         # Get attached managed policies (detect manually attached policies)
         attached_policies = []
+        attached_policy_details = []
         try:
             pol_resp = iam.list_attached_role_policies(RoleName=role_name)
-            attached_policies = sorted(
-                [p.get("PolicyArn", "") for p in pol_resp.get("AttachedPolicies", [])]
-            )
+            for p in pol_resp.get("AttachedPolicies", []):
+                attached_policies.append(p.get("PolicyArn", ""))
+                attached_policy_details.append({
+                    "policy_name": p.get("PolicyName", ""),
+                    "policy_arn": p.get("PolicyArn", ""),
+                })
+            attached_policies = sorted(attached_policies)
         except Exception:
             pass
 
@@ -697,6 +749,7 @@ class AWSProvider:
             "description": role.get("Description", ""),
             "max_session_duration": role.get("MaxSessionDuration"),
             "attached_policy_arns": attached_policies,
+            "attached_policy_details": attached_policy_details,
             "inline_policy_names": inline_policies,
             "attached_policy_count": len(attached_policies),
             "inline_policy_count": len(inline_policies),
@@ -825,9 +878,25 @@ class AWSProvider:
             elif key.get("KeyType") == "RANGE":
                 range_key = key.get("AttributeName", "")
 
-        # Get GSI count (detect manually added indexes)
-        gsi_count = len(table.get("GlobalSecondaryIndexes", []))
-        lsi_count = len(table.get("LocalSecondaryIndexes", []))
+        # Get GSI details (detect manually added indexes)
+        gsi_list = table.get("GlobalSecondaryIndexes", [])
+        gsi_count = len(gsi_list)
+        gsi_details = []
+        for gsi in gsi_list:
+            gsi_details.append({
+                "index_name": gsi.get("IndexName", ""),
+                "index_status": gsi.get("IndexStatus", ""),
+                "key_schema": gsi.get("KeySchema", []),
+            })
+
+        lsi_list = table.get("LocalSecondaryIndexes", [])
+        lsi_count = len(lsi_list)
+        lsi_details = []
+        for lsi in lsi_list:
+            lsi_details.append({
+                "index_name": lsi.get("IndexName", ""),
+                "key_schema": lsi.get("KeySchema", []),
+            })
 
         # Get stream specification
         stream_spec = table.get("StreamSpecification", {})
@@ -871,7 +940,9 @@ class AWSProvider:
             "hash_key": hash_key,
             "range_key": range_key,
             "gsi_count": gsi_count,
+            "gsi_details": gsi_details,
             "lsi_count": lsi_count,
+            "lsi_details": lsi_details,
             "stream_enabled": stream_enabled,
             "stream_view_type": stream_view_type,
             "ttl_enabled": ttl_enabled,
@@ -926,19 +997,51 @@ class AWSProvider:
         encryption_config = cluster.get("encryptionConfig", [])
         encryption_enabled = len(encryption_config) > 0
 
-        # Get node groups count (detect manually added node groups)
+        # Get node groups details (detect manually added node groups)
         nodegroup_count = 0
+        nodegroup_details = []
         try:
             ng_resp = eks.list_nodegroups(clusterName=cluster_name)
-            nodegroup_count = len(ng_resp.get("nodegroups", []))
+            ng_names = ng_resp.get("nodegroups", [])
+            nodegroup_count = len(ng_names)
+            for ng_name in ng_names:
+                try:
+                    ng_detail = eks.describe_nodegroup(
+                        clusterName=cluster_name, nodegroupName=ng_name
+                    )
+                    ng = ng_detail.get("nodegroup", {})
+                    nodegroup_details.append({
+                        "name": ng.get("nodegroupName", ""),
+                        "status": ng.get("status", ""),
+                        "instance_types": ng.get("instanceTypes", []),
+                        "desired_size": ng.get("scalingConfig", {}).get("desiredSize"),
+                        "min_size": ng.get("scalingConfig", {}).get("minSize"),
+                        "max_size": ng.get("scalingConfig", {}).get("maxSize"),
+                    })
+                except Exception:
+                    nodegroup_details.append({"name": ng_name})
         except Exception:
             pass
 
-        # Get addons (detect manually installed addons)
+        # Get addons details (detect manually installed addons)
         addon_names = []
+        addon_details = []
         try:
             addon_resp = eks.list_addons(clusterName=cluster_name)
             addon_names = sorted(addon_resp.get("addons", []))
+            for addon_name in addon_names:
+                try:
+                    addon_detail = eks.describe_addon(
+                        clusterName=cluster_name, addonName=addon_name
+                    )
+                    addon = addon_detail.get("addon", {})
+                    addon_details.append({
+                        "name": addon.get("addonName", ""),
+                        "version": addon.get("addonVersion", ""),
+                        "status": addon.get("status", ""),
+                    })
+                except Exception:
+                    addon_details.append({"name": addon_name})
         except Exception:
             pass
 
@@ -955,7 +1058,9 @@ class AWSProvider:
             "enabled_log_types": enabled_log_types,
             "encryption_enabled": encryption_enabled,
             "nodegroup_count": nodegroup_count,
+            "nodegroup_details": nodegroup_details,
             "addon_names": addon_names,
+            "addon_details": addon_details,
         }
 
         return ResourceMetadata(
@@ -985,11 +1090,19 @@ class AWSProvider:
         tags_response = sns.list_tags_for_resource(ResourceArn=topic_arn)
         tags = self._aws_tags_to_dict(tags_response.get("Tags", []))
 
-        # Get subscription count (detect manually added subscriptions)
+        # Get subscription count and details (detect manually added subscriptions)
         subscription_count = 0
+        subscription_details = []
         try:
             sub_resp = sns.list_subscriptions_by_topic(TopicArn=topic_arn)
-            subscription_count = len(sub_resp.get("Subscriptions", []))
+            subs = sub_resp.get("Subscriptions", [])
+            subscription_count = len(subs)
+            for sub in subs:
+                subscription_details.append({
+                    "subscription_arn": sub.get("SubscriptionArn", ""),
+                    "protocol": sub.get("Protocol", ""),
+                    "endpoint": sub.get("Endpoint", ""),
+                })
         except Exception:
             pass
 
@@ -1003,6 +1116,7 @@ class AWSProvider:
             "fifo_topic": attrs.get("FifoTopic", "false") == "true",
             "content_based_deduplication": attrs.get("ContentBasedDeduplication", "false") == "true",
             "subscription_count": subscription_count,
+            "subscription_details": subscription_details,
             "has_access_policy": has_access_policy,
             "has_delivery_policy": bool(delivery_policy),
         }

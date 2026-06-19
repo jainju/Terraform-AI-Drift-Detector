@@ -15,5 +15,16 @@ python3 -m venv .venv
 # Activate
 source .venv/bin/activate
 
+#clone the repo:
+
+git clone https://github.com/jainju/Terraform-AI-Drift-Detector.git
+
+# Install the prpject 
 pip install -e .
+
+# To check the installation of drift dectector
+drift-detector scan --state ./tests/sample_state.json
+
+
+
 

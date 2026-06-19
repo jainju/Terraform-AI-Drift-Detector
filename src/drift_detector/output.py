@@ -265,7 +265,21 @@ class OutputFormatter:
         parts = []
         for key, value in drift.changes.items():
             if isinstance(value, dict) and "expected" in value and "actual" in value:
-                parts.append(f"{key}: {value['expected']} → {value['actual']}")
+                # Check if there are details to show
+                if "details" in value and isinstance(value["details"], list):
+                    details = value["details"]
+                    parts.append(f"{key}: {value['actual']} found (not in terraform)")
+                    for item in details[:10]:  # Show up to 10 items
+                        if isinstance(item, dict):
+                            # Format based on resource type
+                            item_desc = self._format_detail_item(key, item)
+                            parts.append(f"  • {item_desc}")
+                        else:
+                            parts.append(f"  • {item}")
+                    if len(details) > 10:
+                        parts.append(f"  ... and {len(details) - 10} more")
+                else:
+                    parts.append(f"{key}: {value['expected']} → {value['actual']}")
             elif key == "tags" and isinstance(value, dict):
                 tag_parts = []
                 if "added" in value:
@@ -278,10 +292,69 @@ class OutputFormatter:
             else:
                 parts.append(f"{key}: {value}")
 
-        return "\n".join(parts[:5])  # Limit to 5 lines
+        return "\n".join(parts[:15])  # Limit to 15 lines
+
+    def _format_detail_item(self, indicator_key: str, item: dict) -> str:
+        """Format a detail item for display based on the indicator type."""
+        if indicator_key == "object_count":
+            key = item.get("key", "unknown")
+            size = item.get("size_bytes", 0)
+            modified = item.get("last_modified", "")
+            size_str = self._human_readable_size(size)
+            return f"{key} ({size_str}, modified: {modified})"
+        elif indicator_key == "subnet_count":
+            return f"{item.get('subnet_id', '')} - {item.get('name', 'unnamed')} ({item.get('cidr_block', '')} in {item.get('availability_zone', '')})"
+        elif indicator_key == "route_table_count":
+            return f"{item.get('route_table_id', '')} - {item.get('name', 'unnamed')}"
+        elif indicator_key == "internet_gateway_count":
+            return f"{item.get('igw_id', '')} - {item.get('name', 'unnamed')}"
+        elif indicator_key == "nat_gateway_count":
+            return f"{item.get('nat_gateway_id', '')} - {item.get('name', 'unnamed')} (state: {item.get('state', '')})"
+        elif indicator_key == "attached_policy_count":
+            return f"{item.get('policy_name', '')} ({item.get('policy_arn', '')})"
+        elif indicator_key in ("ingress_rules_count", "egress_rules_count"):
+            proto = item.get("protocol", "all")
+            from_p = item.get("from_port", 0)
+            to_p = item.get("to_port", 0)
+            cidr = item.get("cidr", item.get("cidr_ipv6", item.get("source_sg", "")))
+            port_str = f"{from_p}-{to_p}" if from_p != to_p else str(from_p)
+            return f"{proto} port {port_str} from {cidr}"
+        elif indicator_key == "gsi_count":
+            return f"{item.get('index_name', '')} (status: {item.get('index_status', '')})"
+        elif indicator_key == "lsi_count":
+            return f"{item.get('index_name', '')}"
+        elif indicator_key == "nodegroup_count":
+            return f"{item.get('name', '')} (status: {item.get('status', '')}, types: {item.get('instance_types', [])})"
+        elif indicator_key == "subscription_count":
+            return f"{item.get('protocol', '')}:{item.get('endpoint', '')}"
+        # Generic fallback
+        return str(item)
+
+    @staticmethod
+    def _human_readable_size(size_bytes: int) -> str:
+        """Convert bytes to human readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
     def _format_change_value(self, value: Any) -> str:
         """Format a change value for HTML display."""
         if isinstance(value, dict) and "expected" in value and "actual" in value:
-            return f"<code>{value['expected']}</code> → <code>{value['actual']}</code>"
+            result = f"<code>{value['expected']}</code> → <code>{value['actual']}</code>"
+            if "details" in value and isinstance(value["details"], list):
+                result += "<ul>"
+                for item in value["details"][:10]:
+                    if isinstance(item, dict):
+                        item_str = ", ".join(f"{k}: {v}" for k, v in item.items())
+                        result += f"<li><small>{item_str}</small></li>"
+                    else:
+                        result += f"<li><small>{item}</small></li>"
+                if len(value["details"]) > 10:
+                    result += f"<li><small>... and {len(value['details']) - 10} more</small></li>"
+                result += "</ul>"
+            return result
         return str(value)
