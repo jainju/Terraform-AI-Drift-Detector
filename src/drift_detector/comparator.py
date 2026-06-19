@@ -34,6 +34,15 @@ class DriftComparator:
         """
         self.ignore_attributes = set(ignore_attributes or [])
         self.significant_only = significant_only
+        # Attributes that indicate unmanaged changes when they appear in actual
+        # but not in expected (or differ from a known baseline)
+        self._drift_indicator_attributes = {
+            "object_count",  # Objects added manually to S3 buckets
+            "has_policy",  # Policy added manually
+            "acl_public_read",  # ACL changed manually
+            "logging_enabled",  # Logging toggled manually
+            "lifecycle_rules_count",  # Lifecycle rules added manually
+        }
 
     def compare(
         self,
@@ -137,6 +146,20 @@ class DriftComparator:
                     "actual": act_val,
                 }
 
+        # Check for drift indicator attributes in actual that are not in expected
+        # These represent changes made outside of Terraform (e.g., objects added to S3)
+        actual_only = set(actual.keys()) - set(expected.keys()) - self.ignore_attributes
+        actual_only -= {"tags", "tags_all"}
+        for key in actual_only:
+            if key in self._drift_indicator_attributes:
+                act_val = actual[key]
+                # Flag if the value indicates something was added/changed
+                if self._is_meaningful_drift_indicator(key, act_val):
+                    changes[key] = {
+                        "expected": "<not managed by terraform>",
+                        "actual": act_val,
+                    }
+
         # Check for keys in expected but missing from actual (potential issue)
         expected_only = set(expected.keys()) - set(actual.keys()) - self.ignore_attributes
         expected_only -= {"tags", "tags_all"}
@@ -150,6 +173,25 @@ class DriftComparator:
                     }
 
         return changes
+
+    def _is_meaningful_drift_indicator(self, key: str, value: Any) -> bool:
+        """Determine if a drift indicator value represents an actual change."""
+        # object_count > 0 means objects were added outside terraform
+        if key == "object_count":
+            return isinstance(value, int) and value > 0
+        # has_policy = True means a policy was added manually
+        if key == "has_policy":
+            return value is True
+        # acl_public_read = True means ACL was changed to public
+        if key == "acl_public_read":
+            return value is True
+        # logging_enabled = True means logging was toggled on manually
+        if key == "logging_enabled":
+            return value is True
+        # lifecycle_rules_count > 0 means rules were added manually
+        if key == "lifecycle_rules_count":
+            return isinstance(value, int) and value > 0
+        return False
 
     def _compare_tags(
         self,
@@ -226,12 +268,14 @@ class DriftComparator:
             "storage_encrypted", "multi_az", "instance_type", "instance_class",
             "role", "role_arn", "policy", "cidr_block", "ingress_rules_count",
             "egress_rules_count", "kms_key_id", "kms_master_key_id",
+            "acl_public_read", "has_policy",
         }
 
         medium_severity_keys = {
             "memory_size", "timeout", "runtime", "handler", "engine_version",
             "allocated_storage", "monitoring", "versioning_enabled",
-            "retention_in_days", "sse_algorithm",
+            "retention_in_days", "sse_algorithm", "object_count",
+            "logging_enabled", "lifecycle_rules_count",
         }
 
         changed_keys = set(changes.keys())
