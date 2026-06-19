@@ -1,0 +1,62 @@
+# Terraform Drift Detector Configuration
+# =========================================
+
+# Path to terraform state file (local) or remote backend config
+state:
+  # Options: local, s3, azure_blob, gcs, http
+  backend: local
+  path: "./terraform.tfstate"
+  # For S3 backend:
+  # bucket: "my-terraform-state"
+  # key: "prod/terraform.tfstate"
+  # region: "us-east-1"
+  # For Azure Blob:
+  # container: "tfstate"
+  # blob: "prod.terraform.tfstate"
+  # storage_account: "mystorageaccount"
+
+# Cloud provider configuration
+providers:
+  aws:
+    enabled: true
+    region: "us-east-1"
+    # profile: "default"  # AWS CLI profile
+  azure:
+    enabled: false
+    subscription_id: ""
+    resource_group: ""
+  gcp:
+    enabled: false
+    project_id: ""
+
+# Scheduler configuration
+scheduler:
+  enabled: false
+  # Cron expression: minute hour day month day_of_week
+  cron: "0 */6 * * *"  # Every 6 hours
+
+# Dashboard configuration
+dashboard:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5000
+
+# Output configuration
+output:
+  format: "table"  # Options: table, json, html
+  report_dir: "./reports"
+
+# Drift detection settings
+detection:
+  # Attributes to ignore during comparison
+  ignore_attributes:
+    - "arn"
+    - "id"
+    - "self_link"
+    - "etag"
+    - "creation_date"
+    - "last_modified"
+  # Resource types to skip
+  skip_resources: []
+  # Only scan these resource types (empty = all)
+  include_resources: []

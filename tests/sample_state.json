@@ -1,0 +1,133 @@
+{
+  "version": 4,
+  "terraform_version": "1.7.0",
+  "serial": 12,
+  "lineage": "abc123-def456",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "web_server",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "id": "i-0abc123def456789",
+            "ami": "ami-0c55b159cbfafe1f0",
+            "instance_type": "t3.medium",
+            "key_name": "prod-key",
+            "vpc_id": "vpc-12345678",
+            "subnet_id": "subnet-abcdef01",
+            "availability_zone": "us-east-1a",
+            "monitoring": true,
+            "ebs_optimized": true,
+            "tags": {
+              "Name": "web-server-prod",
+              "Environment": "production",
+              "Team": "platform"
+            },
+            "tags_all": {
+              "Name": "web-server-prod",
+              "Environment": "production",
+              "Team": "platform"
+            },
+            "security_groups": ["sg-111111", "sg-222222"],
+            "arn": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123def456789"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "data_bucket",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "my-app-data-bucket",
+            "bucket": "my-app-data-bucket",
+            "acl": "private",
+            "versioning": [{"enabled": true}],
+            "tags": {
+              "Name": "my-app-data-bucket",
+              "Environment": "production"
+            },
+            "arn": "arn:aws:s3:::my-app-data-bucket"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web_sg",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "id": "sg-111111",
+            "name": "web-sg",
+            "description": "Security group for web servers",
+            "vpc_id": "vpc-12345678",
+            "ingress": [
+              {"from_port": 443, "to_port": 443, "protocol": "tcp", "cidr_blocks": ["0.0.0.0/0"]},
+              {"from_port": 80, "to_port": 80, "protocol": "tcp", "cidr_blocks": ["0.0.0.0/0"]}
+            ],
+            "egress": [
+              {"from_port": 0, "to_port": 0, "protocol": "-1", "cidr_blocks": ["0.0.0.0/0"]}
+            ],
+            "tags": {
+              "Name": "web-sg",
+              "Environment": "production"
+            },
+            "arn": "arn:aws:ec2:us-east-1:123456789012:security-group/sg-111111"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "processor",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "arn:aws:lambda:us-east-1:123456789012:function:data-processor",
+            "function_name": "data-processor",
+            "runtime": "python3.11",
+            "handler": "main.handler",
+            "memory_size": 256,
+            "timeout": 30,
+            "role": "arn:aws:iam::123456789012:role/lambda-exec-role",
+            "tags": {
+              "Name": "data-processor",
+              "Environment": "production"
+            },
+            "arn": "arn:aws:lambda:us-east-1:123456789012:function:data-processor"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_ami",
+      "name": "latest_amazon_linux",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "ami-0c55b159cbfafe1f0"
+          }
+        }
+      ]
+    }
+  ]
+}
