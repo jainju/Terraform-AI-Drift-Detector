@@ -37,11 +37,44 @@ class DriftComparator:
         # Attributes that indicate unmanaged changes when they appear in actual
         # but not in expected (or differ from a known baseline)
         self._drift_indicator_attributes = {
+            # S3
             "object_count",  # Objects added manually to S3 buckets
             "has_policy",  # Policy added manually
             "acl_public_read",  # ACL changed manually
             "logging_enabled",  # Logging toggled manually
             "lifecycle_rules_count",  # Lifecycle rules added manually
+            # EC2
+            "attached_volume_count",  # EBS volumes attached manually
+            "network_interface_count",  # ENIs attached manually
+            "user_data_present",  # User data modified manually
+            "iam_instance_profile",  # IAM profile attached manually
+            # VPC
+            "subnet_count",  # Subnets added manually
+            "route_table_count",  # Route tables added manually
+            "internet_gateway_count",  # IGW attached manually
+            "nat_gateway_count",  # NAT GW added manually
+            # Security Group
+            "ingress_rules_count",  # Rules added manually
+            "egress_rules_count",  # Rules added manually
+            # IAM Role
+            "attached_policy_count",  # Policies attached manually
+            "inline_policy_count",  # Inline policies added manually
+            # Lambda
+            "event_source_mapping_count",  # Triggers added manually
+            # DynamoDB
+            "gsi_count",  # GSIs added manually
+            "lsi_count",  # LSIs added manually
+            # EKS
+            "nodegroup_count",  # Node groups added manually
+            # SNS
+            "subscription_count",  # Subscriptions added manually
+            "has_access_policy",  # Access policy added manually
+            "has_delivery_policy",  # Delivery policy added manually
+            # SQS
+            "has_dead_letter_queue",  # DLQ configured manually
+            # CloudWatch Logs
+            "metric_filter_count",  # Metric filters added manually
+            "subscription_filter_count",  # Subscription filters added manually
         }
 
     def compare(
@@ -176,21 +209,32 @@ class DriftComparator:
 
     def _is_meaningful_drift_indicator(self, key: str, value: Any) -> bool:
         """Determine if a drift indicator value represents an actual change."""
-        # object_count > 0 means objects were added outside terraform
-        if key == "object_count":
+        # Integer counts > 0 indicate something was added manually
+        count_keys = {
+            "object_count", "lifecycle_rules_count", "attached_volume_count",
+            "network_interface_count", "subnet_count", "route_table_count",
+            "internet_gateway_count", "nat_gateway_count", "ingress_rules_count",
+            "egress_rules_count", "attached_policy_count", "inline_policy_count",
+            "event_source_mapping_count", "gsi_count", "lsi_count",
+            "nodegroup_count", "subscription_count", "metric_filter_count",
+            "subscription_filter_count",
+        }
+        if key in count_keys:
             return isinstance(value, int) and value > 0
-        # has_policy = True means a policy was added manually
-        if key == "has_policy":
+
+        # Boolean flags that indicate something was added/changed when True
+        boolean_keys = {
+            "has_policy", "acl_public_read", "logging_enabled",
+            "user_data_present", "has_access_policy", "has_delivery_policy",
+            "has_dead_letter_queue",
+        }
+        if key in boolean_keys:
             return value is True
-        # acl_public_read = True means ACL was changed to public
-        if key == "acl_public_read":
-            return value is True
-        # logging_enabled = True means logging was toggled on manually
-        if key == "logging_enabled":
-            return value is True
-        # lifecycle_rules_count > 0 means rules were added manually
-        if key == "lifecycle_rules_count":
-            return isinstance(value, int) and value > 0
+
+        # String attributes that indicate something was added when non-empty
+        if key == "iam_instance_profile":
+            return isinstance(value, str) and value != ""
+
         return False
 
     def _compare_tags(
@@ -268,14 +312,29 @@ class DriftComparator:
             "storage_encrypted", "multi_az", "instance_type", "instance_class",
             "role", "role_arn", "policy", "cidr_block", "ingress_rules_count",
             "egress_rules_count", "kms_key_id", "kms_master_key_id",
-            "acl_public_read", "has_policy",
+            "acl_public_read", "has_policy", "ingress_rules", "egress_rules",
+            "attached_policy_count", "inline_policy_count", "attached_policy_arns",
+            "inline_policy_names", "assume_role_policy", "endpoint_public_access",
+            "endpoint_private_access", "deletion_protection", "vpc_security_group_ids",
+            "has_access_policy", "source_dest_check", "iam_instance_profile",
         }
 
         medium_severity_keys = {
             "memory_size", "timeout", "runtime", "handler", "engine_version",
             "allocated_storage", "monitoring", "versioning_enabled",
             "retention_in_days", "sse_algorithm", "object_count",
-            "logging_enabled", "lifecycle_rules_count",
+            "logging_enabled", "lifecycle_rules_count", "attached_volume_count",
+            "network_interface_count", "user_data_present", "subnet_count",
+            "route_table_count", "internet_gateway_count", "nat_gateway_count",
+            "event_source_mapping_count", "gsi_count", "lsi_count",
+            "nodegroup_count", "subscription_count", "has_dead_letter_queue",
+            "metric_filter_count", "subscription_filter_count",
+            "root_volume_size", "root_volume_type", "root_volume_encrypted",
+            "backup_retention_period", "auto_minor_version_upgrade",
+            "stream_enabled", "ttl_enabled", "point_in_time_recovery_enabled",
+            "encryption_enabled", "server_side_encryption_enabled",
+            "sqs_managed_sse_enabled", "environment_variables",
+            "reserved_concurrency", "layers", "addon_names",
         }
 
         changed_keys = set(changes.keys())
