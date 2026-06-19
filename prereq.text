@@ -1,0 +1,19 @@
+# Step 1 - update package lists first
+sudo apt-get update
+
+# Step 2 - try install again with --fix-missing
+sudo apt-get install python3.12-venv -y --fix-missing
+
+sudo apt-get install python3-venv -y
+
+# Remove the broken venv folder first
+sudo rm -rf .venv
+
+# Recreate it
+python3 -m venv .venv
+
+# Activate
+source .venv/bin/activate
+
+pip install -e .
+
