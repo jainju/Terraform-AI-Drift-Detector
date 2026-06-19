@@ -1046,6 +1046,17 @@ class AWSProvider:
         tags_response = sqs.list_queue_tags(QueueUrl=queue_url)
         tags = tags_response.get("Tags", {})
 
+        # Check for dead letter queue config (detect manually added DLQ)
+        redrive_policy = attrs.get("RedrivePolicy", "")
+        has_dlq = bool(redrive_policy)
+
+        # Check for queue policy (detect manually added access policy)
+        has_policy = bool(attrs.get("Policy", ""))
+
+        # Check encryption
+        kms_key_id = attrs.get("KmsMasterKeyId", "")
+        sqs_managed_sse = attrs.get("SqsManagedSseEnabled", "false") == "true"
+
         attributes = {
             "name": queue_name,
             "delay_seconds": int(attrs.get("DelaySeconds", 0)),
@@ -1053,6 +1064,12 @@ class AWSProvider:
             "message_retention_seconds": int(attrs.get("MessageRetentionPeriod", 345600)),
             "visibility_timeout_seconds": int(attrs.get("VisibilityTimeout", 30)),
             "fifo_queue": attrs.get("FifoQueue", "false") == "true",
+            "content_based_deduplication": attrs.get("ContentBasedDeduplication", "false") == "true",
+            "has_dead_letter_queue": has_dlq,
+            "has_policy": has_policy,
+            "kms_master_key_id": kms_key_id,
+            "sqs_managed_sse_enabled": sqs_managed_sse,
+            "receive_wait_time_seconds": int(attrs.get("ReceiveMessageWaitTimeSeconds", 0)),
         }
 
         return ResourceMetadata(
@@ -1092,10 +1109,40 @@ class AWSProvider:
         except Exception:
             pass
 
+        # Get metric filters count (detect manually added)
+        metric_filter_count = 0
+        try:
+            mf_resp = logs.describe_metric_filters(logGroupName=log_group_name)
+            metric_filter_count = len(mf_resp.get("metricFilters", []))
+        except Exception:
+            pass
+
+        # Get subscription filters count (detect manually added)
+        subscription_filter_count = 0
+        try:
+            sf_resp = logs.describe_subscription_filters(logGroupName=log_group_name)
+            subscription_filter_count = len(sf_resp.get("subscriptionFilters", []))
+        except Exception:
+            pass
+
+        # Get log streams count (indicates activity/usage)
+        log_stream_count = 0
+        try:
+            ls_resp = logs.describe_log_streams(
+                logGroupName=log_group_name, limit=50, orderBy="LastEventTime", descending=True
+            )
+            log_stream_count = len(ls_resp.get("logStreams", []))
+        except Exception:
+            pass
+
         attributes = {
             "name": lg.get("logGroupName"),
             "retention_in_days": lg.get("retentionInDays", 0),
             "kms_key_id": lg.get("kmsKeyId", ""),
+            "metric_filter_count": metric_filter_count,
+            "subscription_filter_count": subscription_filter_count,
+            "log_stream_count": log_stream_count,
+            "stored_bytes": lg.get("storedBytes", 0),
         }
 
         return ResourceMetadata(
