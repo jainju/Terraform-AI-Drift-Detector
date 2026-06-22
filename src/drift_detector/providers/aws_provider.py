@@ -1280,3 +1280,340 @@ class AWSProvider:
             if key:
                 result[key] = value
         return result
+
+    def discover_resources(self, resource_types: list[str] | None = None) -> list[ResourceMetadata]:
+        """Discover all resources in the AWS account for given types.
+
+        This enables detection of UNMANAGED resources (exist in cloud, not in Terraform).
+
+        Args:
+            resource_types: Resource types to discover. If None, discovers all supported types.
+
+        Returns:
+            List of ResourceMetadata for all discovered resources.
+        """
+        types_to_check = resource_types or self.supported_resource_types
+        discovered: list[ResourceMetadata] = []
+
+        discovery_map = {
+            "aws_instance": self._discover_ec2_instances,
+            "aws_s3_bucket": self._discover_s3_buckets,
+            "aws_security_group": self._discover_security_groups,
+            "aws_vpc": self._discover_vpcs,
+            "aws_subnet": self._discover_subnets,
+            "aws_lambda_function": self._discover_lambda_functions,
+            "aws_iam_role": self._discover_iam_roles,
+            "aws_dynamodb_table": self._discover_dynamodb_tables,
+            "aws_sns_topic": self._discover_sns_topics,
+            "aws_sqs_queue": self._discover_sqs_queues,
+            "aws_cloudwatch_log_group": self._discover_cloudwatch_log_groups,
+        }
+
+        for rtype in types_to_check:
+            discoverer = discovery_map.get(rtype)
+            if discoverer:
+                try:
+                    resources = discoverer()
+                    discovered.extend(resources)
+                    logger.debug(f"Discovered {len(resources)} {rtype} resources")
+                except Exception as e:
+                    logger.error(f"Error discovering {rtype}: {e}")
+
+        return discovered
+
+    def _discover_ec2_instances(self) -> list[ResourceMetadata]:
+        """Discover all running EC2 instances."""
+        ec2 = self._get_client("ec2")
+        resources = []
+        try:
+            paginator = ec2.get_paginator("describe_instances")
+            for page in paginator.paginate(
+                Filters=[{"Name": "instance-state-name", "Values": ["running", "stopped"]}]
+            ):
+                for reservation in page.get("Reservations", []):
+                    for instance in reservation.get("Instances", []):
+                        tags = self._aws_tags_to_dict(instance.get("Tags", []))
+                        resources.append(ResourceMetadata(
+                            resource_type="aws_instance",
+                            resource_id=instance.get("InstanceId", ""),
+                            resource_name=tags.get("Name", ""),
+                            provider="aws",
+                            region=self.region,
+                            attributes={
+                                "id": instance.get("InstanceId", ""),
+                                "instance_type": instance.get("InstanceType", ""),
+                                "instance_state": instance.get("State", {}).get("Name", ""),
+                                "vpc_id": instance.get("VpcId", ""),
+                                "subnet_id": instance.get("SubnetId", ""),
+                                "ami": instance.get("ImageId", ""),
+                                "launch_time": str(instance.get("LaunchTime", "")),
+                            },
+                            tags=tags,
+                            raw={},
+                        ))
+        except Exception as e:
+            logger.error(f"Error discovering EC2 instances: {e}")
+        return resources
+
+    def _discover_s3_buckets(self) -> list[ResourceMetadata]:
+        """Discover all S3 buckets."""
+        s3 = self._get_client("s3")
+        resources = []
+        try:
+            response = s3.list_buckets()
+            for bucket in response.get("Buckets", []):
+                bucket_name = bucket.get("Name", "")
+                resources.append(ResourceMetadata(
+                    resource_type="aws_s3_bucket",
+                    resource_id=bucket_name,
+                    resource_name=bucket_name,
+                    provider="aws",
+                    region=self.region,
+                    attributes={
+                        "bucket": bucket_name,
+                        "creation_date": str(bucket.get("CreationDate", "")),
+                    },
+                    tags={},
+                    raw={},
+                ))
+        except Exception as e:
+            logger.error(f"Error discovering S3 buckets: {e}")
+        return resources
+
+    def _discover_security_groups(self) -> list[ResourceMetadata]:
+        """Discover all security groups."""
+        ec2 = self._get_client("ec2")
+        resources = []
+        try:
+            paginator = ec2.get_paginator("describe_security_groups")
+            for page in paginator.paginate():
+                for sg in page.get("SecurityGroups", []):
+                    tags = self._aws_tags_to_dict(sg.get("Tags", []))
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_security_group",
+                        resource_id=sg.get("GroupId", ""),
+                        resource_name=sg.get("GroupName", ""),
+                        provider="aws",
+                        region=self.region,
+                        attributes={
+                            "id": sg.get("GroupId", ""),
+                            "name": sg.get("GroupName", ""),
+                            "vpc_id": sg.get("VpcId", ""),
+                            "description": sg.get("Description", ""),
+                        },
+                        tags=tags,
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering security groups: {e}")
+        return resources
+
+    def _discover_vpcs(self) -> list[ResourceMetadata]:
+        """Discover all VPCs."""
+        ec2 = self._get_client("ec2")
+        resources = []
+        try:
+            response = ec2.describe_vpcs()
+            for vpc in response.get("Vpcs", []):
+                tags = self._aws_tags_to_dict(vpc.get("Tags", []))
+                resources.append(ResourceMetadata(
+                    resource_type="aws_vpc",
+                    resource_id=vpc.get("VpcId", ""),
+                    resource_name=tags.get("Name", ""),
+                    provider="aws",
+                    region=self.region,
+                    attributes={
+                        "id": vpc.get("VpcId", ""),
+                        "cidr_block": vpc.get("CidrBlock", ""),
+                        "state": vpc.get("State", ""),
+                        "is_default": vpc.get("IsDefault", False),
+                    },
+                    tags=tags,
+                    raw={},
+                ))
+        except Exception as e:
+            logger.error(f"Error discovering VPCs: {e}")
+        return resources
+
+    def _discover_subnets(self) -> list[ResourceMetadata]:
+        """Discover all subnets."""
+        ec2 = self._get_client("ec2")
+        resources = []
+        try:
+            paginator = ec2.get_paginator("describe_subnets")
+            for page in paginator.paginate():
+                for subnet in page.get("Subnets", []):
+                    tags = self._aws_tags_to_dict(subnet.get("Tags", []))
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_subnet",
+                        resource_id=subnet.get("SubnetId", ""),
+                        resource_name=tags.get("Name", ""),
+                        provider="aws",
+                        region=self.region,
+                        attributes={
+                            "id": subnet.get("SubnetId", ""),
+                            "vpc_id": subnet.get("VpcId", ""),
+                            "cidr_block": subnet.get("CidrBlock", ""),
+                            "availability_zone": subnet.get("AvailabilityZone", ""),
+                        },
+                        tags=tags,
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering subnets: {e}")
+        return resources
+
+    def _discover_lambda_functions(self) -> list[ResourceMetadata]:
+        """Discover all Lambda functions."""
+        lam = self._get_client("lambda")
+        resources = []
+        try:
+            paginator = lam.get_paginator("list_functions")
+            for page in paginator.paginate():
+                for func in page.get("Functions", []):
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_lambda_function",
+                        resource_id=func.get("FunctionArn", ""),
+                        resource_name=func.get("FunctionName", ""),
+                        provider="aws",
+                        region=self.region,
+                        attributes={
+                            "function_name": func.get("FunctionName", ""),
+                            "runtime": func.get("Runtime", ""),
+                            "handler": func.get("Handler", ""),
+                            "memory_size": func.get("MemorySize"),
+                            "timeout": func.get("Timeout"),
+                            "last_modified": func.get("LastModified", ""),
+                        },
+                        tags={},
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering Lambda functions: {e}")
+        return resources
+
+    def _discover_iam_roles(self) -> list[ResourceMetadata]:
+        """Discover all IAM roles (excluding AWS service-linked roles)."""
+        iam = self._get_client("iam")
+        resources = []
+        try:
+            paginator = iam.get_paginator("list_roles")
+            for page in paginator.paginate():
+                for role in page.get("Roles", []):
+                    # Skip AWS service-linked roles
+                    path = role.get("Path", "")
+                    if path.startswith("/aws-service-role/"):
+                        continue
+                    tags = self._aws_tags_to_dict(role.get("Tags", []))
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_iam_role",
+                        resource_id=role.get("Arn", ""),
+                        resource_name=role.get("RoleName", ""),
+                        provider="aws",
+                        region="global",
+                        attributes={
+                            "name": role.get("RoleName", ""),
+                            "path": path,
+                            "description": role.get("Description", ""),
+                        },
+                        tags=tags,
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering IAM roles: {e}")
+        return resources
+
+    def _discover_dynamodb_tables(self) -> list[ResourceMetadata]:
+        """Discover all DynamoDB tables."""
+        dynamodb = self._get_client("dynamodb")
+        resources = []
+        try:
+            paginator = dynamodb.get_paginator("list_tables")
+            for page in paginator.paginate():
+                for table_name in page.get("TableNames", []):
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_dynamodb_table",
+                        resource_id=table_name,
+                        resource_name=table_name,
+                        provider="aws",
+                        region=self.region,
+                        attributes={"name": table_name},
+                        tags={},
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering DynamoDB tables: {e}")
+        return resources
+
+    def _discover_sns_topics(self) -> list[ResourceMetadata]:
+        """Discover all SNS topics."""
+        sns = self._get_client("sns")
+        resources = []
+        try:
+            paginator = sns.get_paginator("list_topics")
+            for page in paginator.paginate():
+                for topic in page.get("Topics", []):
+                    topic_arn = topic.get("TopicArn", "")
+                    topic_name = topic_arn.split(":")[-1] if topic_arn else ""
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_sns_topic",
+                        resource_id=topic_arn,
+                        resource_name=topic_name,
+                        provider="aws",
+                        region=self.region,
+                        attributes={"arn": topic_arn, "name": topic_name},
+                        tags={},
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering SNS topics: {e}")
+        return resources
+
+    def _discover_sqs_queues(self) -> list[ResourceMetadata]:
+        """Discover all SQS queues."""
+        sqs = self._get_client("sqs")
+        resources = []
+        try:
+            response = sqs.list_queues()
+            for queue_url in response.get("QueueUrls", []):
+                queue_name = queue_url.split("/")[-1]
+                resources.append(ResourceMetadata(
+                    resource_type="aws_sqs_queue",
+                    resource_id=queue_url,
+                    resource_name=queue_name,
+                    provider="aws",
+                    region=self.region,
+                    attributes={"url": queue_url, "name": queue_name},
+                    tags={},
+                    raw={},
+                ))
+        except Exception as e:
+            logger.error(f"Error discovering SQS queues: {e}")
+        return resources
+
+    def _discover_cloudwatch_log_groups(self) -> list[ResourceMetadata]:
+        """Discover all CloudWatch Log Groups."""
+        logs = self._get_client("logs")
+        resources = []
+        try:
+            paginator = logs.get_paginator("describe_log_groups")
+            for page in paginator.paginate():
+                for lg in page.get("logGroups", []):
+                    log_group_name = lg.get("logGroupName", "")
+                    resources.append(ResourceMetadata(
+                        resource_type="aws_cloudwatch_log_group",
+                        resource_id=lg.get("arn", log_group_name),
+                        resource_name=log_group_name,
+                        provider="aws",
+                        region=self.region,
+                        attributes={
+                            "name": log_group_name,
+                            "retention_in_days": lg.get("retentionInDays", 0),
+                            "stored_bytes": lg.get("storedBytes", 0),
+                        },
+                        tags={},
+                        raw={},
+                    ))
+        except Exception as e:
+            logger.error(f"Error discovering CloudWatch Log Groups: {e}")
+        return resources

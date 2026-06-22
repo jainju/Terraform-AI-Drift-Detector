@@ -23,7 +23,7 @@ git clone https://github.com/jainju/Terraform-AI-Drift-Detector.git
 pip install -e .
 
 # To check the installation of drift dectector
-drift-detector scan --state ./tests/sample_state.json
+drift-detector scan --state ./terraform.tfstate
 
 
 
