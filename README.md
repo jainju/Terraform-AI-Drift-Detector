@@ -243,4 +243,8 @@ Test result :
 ![alt text](image-1.png)
 
 
+2. If we are adding any resource in AWS console manually which is not having tf file , it is also detecting that and show it in drift detector's report :
+
+![alt text](image-2.png)
+
 
