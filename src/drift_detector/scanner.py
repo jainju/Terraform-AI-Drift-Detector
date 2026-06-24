@@ -192,10 +192,14 @@ class DriftScanner:
                     state_ids.add((r.resource_type, str(r.attributes[id_attr])))
 
         # Determine which resource types to discover
-        types_to_discover = set()
-        for r in state_resources:
-            types_to_discover.add(r.resource_type)
-        # Also check include/skip filters
+        # Discover ALL supported resource types, not just those in state,
+        # so we catch resources created entirely outside Terraform
+        types_to_discover: set[str] = set()
+        for provider in self.registry._providers.values():
+            if hasattr(provider, "supported_resource_types"):
+                types_to_discover.update(provider.supported_resource_types)
+
+        # Apply include/skip filters
         if self.include_resources:
             types_to_discover = types_to_discover & self.include_resources
         if self.skip_resources:
